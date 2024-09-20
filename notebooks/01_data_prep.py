@@ -1,8 +1,10 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC - change params to your catalog/schema
-# MAGIC - add some pdfs to the volume raw_data
-# MAGIC - DBR 14.3 LTS
+# MAGIC - add .txt files to the volume raw_data
+# MAGIC - Compute:
+# MAGIC   - Runtime: DBR 14.3 LTS 
+# MAGIC   - For this first notebook will likely want to make it multinode as well, disable autoscaling and just set it to 4 or 6 nodes to process the data faster
 
 # COMMAND ----------
 
@@ -28,12 +30,34 @@ dbutils.fs.mkdirs(f"{raw_data_path}/training/cpt/text/val")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC upload pdfs to raw_data for this to work
+# MAGIC upload .txt files to raw_data for this to work
 
 # COMMAND ----------
 
-doc_df = load_and_clean_data(f"{raw_data_path}/raw_data")
+# use below to read each file into a row of a spark dataframe
+
+from pyspark.sql import functions as F
+
+# Assuming the volume with .txt files is mounted and its path is specified
+txt_files_volume_path = f"{raw_data_path}/raw_data/"
+
+# Read all .txt files from the volume into a dataframe
+doc_df = spark.read.text(txt_files_volume_path + "*.txt") \
+              .withColumn("path", F.input_file_name())
+
+#Concatenate all lines in each file into a single string, and associate with file name
+doc_df = doc_df.groupBy("path") \
+    .agg(F.collect_list("value").alias("all_lines")) \
+    .withColumn("text", F.concat_ws("\n", F.col("all_lines"))) \
+    .drop("all_lines")
+
 display(doc_df)
+
+# COMMAND ----------
+
+# uncomment below if you want to load in pdfs
+# doc_df = load_and_clean_data(f"{raw_data_path}/raw_data")
+# display(doc_df)
 
 # COMMAND ----------
 
