@@ -21,7 +21,7 @@ def evaluate_qa_chain(
     columns: List[str],
     chain_to_evaluate,
     run_name: str,
-    llm_judge: str = "databricks-dbrx-instruct",
+    llm_judge: str = "databricks-meta-llama-3-1-70b-instruct",
 ):
     """
     Runs the evaluation of the LangChain LCEL Chain using defined dataset with questions and answers and logs the results to MLflow

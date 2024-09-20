@@ -4,6 +4,12 @@
 
 # COMMAND ----------
 
+catalog = "users"
+schema = "max_carduner"
+base_data_path = f"/Volumes/{catalog}/{schema}"
+
+# COMMAND ----------
+
 from langchain_community.chat_models.databricks import ChatDatabricks
 from langchain_core.language_models import BaseLanguageModel
 from langchain_core.output_parsers import StrOutputParser
@@ -67,10 +73,10 @@ Please answer the question using the given context:
 
 # COMMAND ----------
 
-llm_mistral = ChatDatabricks(endpoint="mistral7b", temperature=0.1)
+llm_llama = ChatDatabricks(endpoint="pt-meta_llama_v3_1_8b_instruct", temperature=0.1)
 qa_chain_zeroshot = build_retrievalqa_zeroshot_chain(QA_TEMPLATE_ZEROSHOT, llm_mistral)
 qa_chain_with_ctx = build_retrievalqa_with_context_chain(
-    QA_TEMPLATE_WITH_CTX, llm_mistral
+    QA_TEMPLATE_WITH_CTX, llm_llama
 )
 
 # COMMAND ----------
@@ -78,14 +84,14 @@ qa_chain_with_ctx = build_retrievalqa_with_context_chain(
 from pyspark.sql.functions import col
 
 val_qa_eval_pdf = pd.read_json(
-    path_or_buf="/Volumes/msh/finreg/training/ift/jsonl/val.jsonl", lines=True
+    path_or_buf=f"{base_data_path}/training/ift/jsonl/val.jsonl", lines=True
 )
 val_qa_eval_sdf = (
     get_spark()
     .createDataFrame(val_qa_eval_pdf)
     .alias("v")
     .join(
-        get_spark().read.table("msh.finreg.qa_dataset").alias("f"),
+        get_spark().read.table(f"{catalog}.{schema}.qa_dataset").alias("f"),
         col("f.answer") == col("v.response"),
     )
     .select(col("f.context"), col("f.question"), col("f.answer"))
@@ -99,7 +105,7 @@ eval_results = evaluate_qa_chain(
     val_qa_eval_df,
     ["context", "question"],
     qa_chain_zeroshot,
-    "CRR_Mistral_Baseline_ZeroShot",
+    "CRR_Llama_Baseline_ZeroShot",
 )
 print(f"See evaluation metrics below: \n{eval_results.metrics}")
 display(eval_results.tables["eval_results_table"])  # noqa
@@ -110,14 +116,14 @@ eval_results = evaluate_qa_chain(
     val_qa_eval_df,
     ["context", "question"],
     qa_chain_with_ctx,
-    "CRR_Mistral_Baseline_With_Ctx",
+    "CRR_Llama_Baseline_With_Ctx",
 )
 print(f"See evaluation metrics below: \n{eval_results.metrics}")
 display(eval_results.tables["eval_results_table"])  # noqa
 
 # COMMAND ----------
 
-llm_mistral = ChatDatabricks(endpoint="crr_mistral_ift_v1", temperature=0.1)
+llm_mistral = ChatDatabricks(endpoint="FILL THIS IN", temperature=0.1) #update endpoint
 qa_chain_zeroshot = build_retrievalqa_zeroshot_chain(QA_TEMPLATE_ZEROSHOT, llm_mistral)
 qa_chain_with_ctx = build_retrievalqa_with_context_chain(
     QA_TEMPLATE_WITH_CTX, llm_mistral
@@ -129,7 +135,7 @@ eval_results = evaluate_qa_chain(
     val_qa_eval_df,
     ["context", "question"],
     qa_chain_zeroshot,
-    "CRR_Mistral_FT_ZeroShot",
+    "CRR_Llama_FT_ZeroShot",
 )
 print(f"See evaluation metrics below: \n{eval_results.metrics}")
 display(eval_results.tables["eval_results_table"])  # noqa
@@ -140,7 +146,7 @@ eval_results = evaluate_qa_chain(
     val_qa_eval_df,
     ["context", "question"],
     qa_chain_with_ctx,
-    "CRR_Mistral_FT_With_Ctx",
+    "CRR_Llama_FT_With_Ctx",
 )
 print(f"See evaluation metrics below: \n{eval_results.metrics}")
 display(eval_results.tables["eval_results_table"])  # noqa

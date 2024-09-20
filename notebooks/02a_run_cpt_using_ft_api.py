@@ -13,6 +13,17 @@
 
 # COMMAND ----------
 
+catalog = "users"
+schema = "max_carduner"
+base_data_path = f"/Volumes/{catalog}/{schema}"
+
+# COMMAND ----------
+
+from finreganalytics.utils import get_dbutils
+get_dbutils().widgets.removeAll()
+
+# COMMAND ----------
+
 import os.path
 
 from databricks.model_training import foundation_model as fm
@@ -23,10 +34,10 @@ setup_logging()
 
 SUPPORTED_INPUT_MODELS = fm.get_models().to_pandas()["name"].to_list()
 get_dbutils().widgets.combobox(
-    "base_model", "mistralai/Mistral-7B-v0.1", SUPPORTED_INPUT_MODELS, "base_model"
+    "base_model", "meta-llama/Meta-Llama-3.1-8B", SUPPORTED_INPUT_MODELS, "base_model"
 )
 get_dbutils().widgets.text(
-    "data_path", "/Volumes/main/finreg/training/cpt/text/train/", "data_path"
+    "data_path", f"{base_data_path}/training/cpt/text/train/", "data_path"
 )
 
 get_dbutils().widgets.text("training_duration", "1ep", "training_duration")
@@ -45,7 +56,7 @@ run = fm.create(
     model=base_model,
     train_data_path=data_path,
     eval_data_path=data_path,
-    register_to="main.finreg",
+    register_to=f"{catalog}.{schema}",
     training_duration=training_duration,
     learning_rate=learning_rate,
     task_type="CONTINUED_PRETRAIN",

@@ -14,6 +14,17 @@
 
 # COMMAND ----------
 
+catalog = "users"
+schema = "max_carduner"
+base_data_path = f"/Volumes/{catalog}/{schema}"
+
+# COMMAND ----------
+
+from finreganalytics.utils import get_dbutils
+get_dbutils().widgets.removeAll()
+
+# COMMAND ----------
+
 import os.path
 
 from databricks.model_training import foundation_model as fm
@@ -24,17 +35,17 @@ setup_logging()
 
 SUPPORTED_INPUT_MODELS = fm.get_models().to_pandas()["name"].to_list()
 get_dbutils().widgets.combobox(
-    "base_model", "mistralai/Mistral-7B-v0.1", SUPPORTED_INPUT_MODELS, "base_model"
+    "base_model", "meta-llama/Meta-Llama-3.1-8B", SUPPORTED_INPUT_MODELS, "base_model"
 )
 get_dbutils().widgets.text(
-    "data_path", "/Volumes/main/finreg/training/ift/jsonl", "data_path"
+    "data_path", f"{base_data_path}/training/ift/jsonl", "data_path"
 )
 
 get_dbutils().widgets.text("training_duration", "10ep", "training_duration")
 get_dbutils().widgets.text("learning_rate", "1e-6", "learning_rate")
 get_dbutils().widgets.text(
     "custom_weights_path",
-    "",
+    "dbfs:/databricks/mlflow-tracking/3333570012308106/10881276cc5e4007a5f01259c28077e4/artifacts/contd-pretrain-meta-llama-3-1-8b-tg1i9b/checkpoints/ep1-ba3", #replace with yours
     "custom_weights_path",
 )
 

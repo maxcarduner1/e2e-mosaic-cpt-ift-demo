@@ -83,7 +83,7 @@ def build_qa_eval_dataset(
         stop_after_attempt=100, wait_exponential_jitter=False
     )
 
-    questions_results = questions_chain.batch(chunks, config={"max_concurrency": 4})
+    questions_results = questions_chain.batch(chunks, config={"max_concurrency": 16})
     questions_df = pd.DataFrame(
         [
             {
@@ -101,7 +101,7 @@ def build_qa_eval_dataset(
         answer=answer_prompt | llm | StrOutputParser(),
     ).with_retry(stop_after_attempt=100)
     answers_results = answers_chain.batch(
-        questions_dict_list, config={"max_concurrency": 4}
+        questions_dict_list, config={"max_concurrency": 16}
     )
     res_df = pd.DataFrame(answers_results).dropna()
     return res_df

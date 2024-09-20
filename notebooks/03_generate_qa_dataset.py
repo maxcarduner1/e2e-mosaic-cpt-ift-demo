@@ -23,15 +23,26 @@ try:
 except:
     pass
 
+catalog = 'users'
+schema = 'max_carduner'
+
+# COMMAND ----------
+
+mds_data_path = f"/Volumes/{catalog}/{schema}/training/ift/mds/"
+jsonl_data_path = f"/Volumes/{catalog}/{schema}/training/ift/jsonl/"
+
+dbutils.fs.mkdirs(mds_data_path)
+dbutils.fs.mkdirs(jsonl_data_path)
+
 # COMMAND ----------
 
 
-chunks_df = get_spark().read.table("main.finreg.splitted_documents")
+chunks_df = get_spark().read.table(f"{catalog}.{schema}.splitted_documents")
 chunks = chunks_df.toPandas()["text"].values.tolist()
 
 # COMMAND ----------
 
-llm_dbrx = ChatDatabricks(endpoint="databricks-dbrx-instruct", temperature=0.1)
+llm_dbrx = ChatDatabricks(endpoint="pt-meta_llama_v3_1_8b_instruct", temperature=0.1)
 EVALUATION_QUESTION_GENERATION_PROMPT_TMPL = """\
 Context information is below.
 
@@ -85,7 +96,7 @@ qa_questions_df = build_qa_eval_dataset(
     llm_dbrx,
     question_prompt_template_str=EVALUATION_QUESTION_GENERATION_PROMPT_TMPL,
     answer_prompt_template_str=QA_TEMPLATE_RAG,
-    num_questions_per_chunk=10,
+    num_questions_per_chunk=2,
 )
 
 display(qa_questions_df)  # noqa
@@ -93,57 +104,54 @@ display(qa_questions_df)  # noqa
 # COMMAND ----------
 
 get_spark().createDataFrame(qa_questions_df).write.mode("overwrite").saveAsTable(
-    "main.finreg.qa_dataset"
+    f"{catalog}.{schema}.qa_dataset"
 )
 
 # COMMAND ----------
 
-# MAGIC %sql select count(*) from main.finreg.qa_dataset;
+spark.sql(f"select count(*) from {catalog}.{schema}.qa_dataset")
 
 # COMMAND ----------
-
-mds_data_path = "/Volumes/main/finreg/training/ift/mds/"
-jsonl_data_path = "/Volumes/main/finreg/training/ift/jsonl/"
 
 
 ift_train_df, ift_val_df = (
-    get_spark().table("main.finreg.qa_dataset").randomSplit([0.99, 0.01])
+    get_spark().table(f"{catalog}.{schema}.qa_dataset").randomSplit([0.99, 0.01])
 )
-ift_train_df.write.mode("overwrite").saveAsTable("main.finreg.qa_dataset_train")
-ift_val_df.write.mode("overwrite").saveAsTable("main.finreg.qa_dataset_val")
+ift_train_df.write.mode("overwrite").saveAsTable(f"{catalog}.{schema}.qa_dataset_train")
+ift_val_df.write.mode("overwrite").saveAsTable(f"{catalog}.{schema}.qa_dataset_val")
 
 # COMMAND ----------
 
 
-ift_completions_train_df = prepare_ift_dataset("main.finreg.qa_dataset_train", limit=-1)
-ift_completions_val_df = prepare_ift_dataset("main.finreg.qa_dataset_val", limit=-1)
+ift_completions_train_df = prepare_ift_dataset(f"{catalog}.{schema}.qa_dataset_train", limit=-1)
+ift_completions_val_df = prepare_ift_dataset(f"{catalog}.{schema}.qa_dataset_val", limit=-1)
 
 # COMMAND ----------
 
-instruct_train_df = load_huggingface_dataset("mosaicml/instruct-v3", split="train")
-instruct_train_df = prepare_ift_dataset(
-    spark_df=instruct_train_df,
-    apply_prompt_formatting=False,
-    question_col="prompt",
-    response_col="response",
-)
+# instruct_train_df = load_huggingface_dataset("mosaicml/instruct-v3", split="train")
+# instruct_train_df = prepare_ift_dataset(
+#     spark_df=instruct_train_df,
+#     apply_prompt_formatting=False,
+#     question_col="prompt",
+#     response_col="response",
+# )
 
-instruct_val_df = load_huggingface_dataset("mosaicml/instruct-v3", split="test")
-instruct_val_df = prepare_ift_dataset(
-    spark_df=instruct_val_df,
-    apply_prompt_formatting=False,
-    question_col="prompt",
-    response_col="response",
-)
+# instruct_val_df = load_huggingface_dataset("mosaicml/instruct-v3", split="test")
+# instruct_val_df = prepare_ift_dataset(
+#     spark_df=instruct_val_df,
+#     apply_prompt_formatting=False,
+#     question_col="prompt",
+#     response_col="response",
+# )
 
-ift_completions_train_df = (
-    ift_completions_train_df.union(instruct_train_df).orderBy(rand()).repartition(8)
-)
-ift_completions_val_df = (
-    ift_completions_val_df.union(instruct_val_df).orderBy(rand()).repartition(8)
-)
+# ift_completions_train_df = (
+#     ift_completions_train_df.union(instruct_train_df).orderBy(rand()).repartition(8)
+# )
+# ift_completions_val_df = (
+#     ift_completions_val_df.union(instruct_val_df).orderBy(rand()).repartition(8)
+# )
 
-display(ift_completions_val_df)  # noqa
+# display(ift_completions_val_df)  # noqa
 
 # COMMAND ----------
 
