@@ -1,5 +1,6 @@
 # Databricks notebook source
-# MAGIC %pip install -r ../requirements.txt
+#single node MLR 14.3
+%pip install -r ../requirements.txt
 
 # COMMAND ----------
 
@@ -16,7 +17,7 @@
 
 catalog = "users"
 schema = "max_carduner"
-base_data_path = f"/Volumes/{catalog}/{schema}"
+cluster_id = spark.conf.get("spark.databricks.clusterUsageTags.clusterId") # change this if you don't want to use existing cluster for the data prep that converts the input delta table into .jsonl files for us
 
 # COMMAND ----------
 
@@ -37,11 +38,8 @@ SUPPORTED_INPUT_MODELS = fm.get_models().to_pandas()["name"].to_list()
 get_dbutils().widgets.combobox(
     "base_model", "meta-llama/Meta-Llama-3.1-8B", SUPPORTED_INPUT_MODELS, "base_model"
 )
-get_dbutils().widgets.text(
-    "data_path", f"{base_data_path}/training/ift/jsonl", "data_path"
-)
 
-get_dbutils().widgets.text("training_duration", "10ep", "training_duration")
+get_dbutils().widgets.text("training_duration", "10ep", "training_duration") # Check the mlflow experiment metrics to see if you should increase this number
 get_dbutils().widgets.text("learning_rate", "1e-6", "learning_rate")
 get_dbutils().widgets.text(
     "custom_weights_path",
@@ -52,7 +50,6 @@ get_dbutils().widgets.text(
 # COMMAND ----------
 
 base_model = get_dbutils().widgets.get("base_model")
-data_path = get_dbutils().widgets.get("data_path")
 training_duration = get_dbutils().widgets.get("training_duration")
 learning_rate = get_dbutils().widgets.get("learning_rate")
 custom_weights_path = get_dbutils().widgets.get("custom_weights_path")
@@ -63,13 +60,13 @@ if len(custom_weights_path) < 1:
 
 run = fm.create(
   model=base_model,
-  train_data_path=f"{data_path}/train.jsonl",
-  eval_data_path=f"{data_path}/val.jsonl",
-  register_to="main.finreg",
+  train_data_path=f"{catalog}.{schema}.chat_completion_training_dataset",
+  register_to=f"{catalog}.{schema}",
   training_duration=training_duration,
   learning_rate=learning_rate,
   custom_weights_path=custom_weights_path,
-  task_type="INSTRUCTION_FINETUNE",
+  task_type="CHAT_COMPLETION",
+  data_prep_cluster_id=cluster_id
 )
 
 # COMMAND ----------

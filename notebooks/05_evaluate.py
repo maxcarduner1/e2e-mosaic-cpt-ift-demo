@@ -1,152 +1,278 @@
 # Databricks notebook source
-# MAGIC %pip install -r ../requirements.txt
-# MAGIC dbutils.library.restartPython()
+# single node MLR 14.3, 16 cores
+%pip install -r ../requirements.txt
+dbutils.library.restartPython()
 
 # COMMAND ----------
 
-catalog = "users"
-schema = "max_carduner"
-base_data_path = f"/Volumes/{catalog}/{schema}"
+import json
+# set params below
+catalog = 'users'
+schema = 'max_carduner'
+input_table_name = f"{catalog}.{schema}.chat_completion_evaluation_dataset"
+input_column_name = "outline"
+output_table_name = f"{catalog}.{schema}.chat_completion_evaluation_dataset_preds"
+output_table_name_ft = f"{catalog}.{schema}.chat_completion_evaluation_dataset_preds_ft"
+endpoint_name = 'meta_llama_v3_1_8b_instruct'
+endpoint_name_ift = 'ift-meta-llama-3-1-8b-scexcv'
+timeout="300"
+max_retries="8"
+request_params = '{"max_tokens": 1000, "temperature": 0.1}'
+concurrency = "15"
+input_num_rows = '1000' # adapt this to your dataset
+system_prompt = "You are a marketing professional trusted assistant at blackbaud that helps write rough draft copy into the approved tone and voice. Only focus on the content that is provided by the user, don't add any additional context, just focus on getting it into the approved tone. Do not repeat information, answer directly, do not repeat the question, do not start with something like: the answer to the question, do not add AI in front of your answer, do not say: here is the answer. Given the following outline, write a final copy in our approved tone and voice. Outline:\n"
 
-# COMMAND ----------
+# Load Configurations from Widgets
+config_endpoint = endpoint_name
+config_timeout = int(timeout)
+config_max_retries = int(max_retries)
 
-from langchain_community.chat_models.databricks import ChatDatabricks
-from langchain_core.language_models import BaseLanguageModel
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import PromptTemplate
-from langchain_core.runnables import RunnablePassthrough, RunnableParallel
-import pandas as pd
-from finreganalytics.dataprep.evaluation import evaluate_qa_chain
-from finreganalytics.utils import get_spark
+config_prompt = False # we already set the prompt written into the dataset
+config_request_params = json.loads(request_params
+ ) # Reference: https://docs.databricks.com/en/machine-learning/foundation-models/api-reference.html#chat-request
 
+config_concurrecy = int(concurrency)
+config_logging_interval = 5
 
-def build_retrievalqa_zeroshot_chain(prompt_template_str: str, llm: BaseLanguageModel):
-    prompt = PromptTemplate(template=prompt_template_str, input_variables=["question"])
-    chain = prompt | llm | StrOutputParser()
-
-    return chain
-
-
-def build_retrievalqa_with_context_chain(
-    prompt_template_str: str, llm: BaseLanguageModel
-):
-    prompt = PromptTemplate(
-        template=prompt_template_str, input_variables=["context", "question"]
-    )
-
-    chain = prompt | llm | StrOutputParser()
-
-    return chain
-
-
-# COMMAND ----------
-
-QA_TEMPLATE_ZEROSHOT = """
-You are a Regulatory Reporting Assistant. 
-Please answer the question as precise as possible.  
-If you do not know, just say I don't know.
-
-### Instruction:
-Please answer the question:
--- Question
-{question}
-------
-
-### Response:
-"""
-
-QA_TEMPLATE_WITH_CTX = """You are a Regulatory Reporting Assistant. 
-Please answer the question as precise as possible using information in context. 
-If you do not know, just say I don't know.
-
-### Instruction:
-Please answer the question using the given context:
--- Context:
-{context}
-------
--- Question
-{question}
-------
-
-### Response:
-"""
-
-# COMMAND ----------
-
-llm_llama = ChatDatabricks(endpoint="pt-meta_llama_v3_1_8b_instruct", temperature=0.1)
-qa_chain_zeroshot = build_retrievalqa_zeroshot_chain(QA_TEMPLATE_ZEROSHOT, llm_mistral)
-qa_chain_with_ctx = build_retrievalqa_with_context_chain(
-    QA_TEMPLATE_WITH_CTX, llm_llama
-)
+config_input_table = input_table_name
+config_input_column = input_column_name
+config_input_num_rows = int(input_num_rows)
+config_output_table = output_table_name
 
 # COMMAND ----------
 
 from pyspark.sql.functions import col
 
-val_qa_eval_pdf = pd.read_json(
-    path_or_buf=f"{base_data_path}/training/ift/jsonl/val.jsonl", lines=True
+val_qa_eval = spark.read.table(input_table_name)
+display(val_qa_eval)  # noqa
+
+# COMMAND ----------
+
+import os
+from mlflow.deployments import get_deploy_client
+
+class ChatClient:
+    def __init__(self):
+        os.environ["MLFLOW_HTTP_REQUEST_MAX_RETRIES"] = str(config_max_retries)
+        os.environ["MLFLOW_HTTP_REQUEST_TIMEOUT"] = str(config_timeout)
+
+        self.client = get_deploy_client("databricks")
+        self.endpoint = config_endpoint
+        self.request_params = config_request_params
+        self.system_prompt = system_prompt
+
+    def predict(self, text):
+        messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": str(text)}
+            ]
+
+        response = self.client.predict(
+            endpoint=self.endpoint,
+            inputs={
+                "messages": messages,
+                **self.request_params
+            }
+        )
+        return response["choices"][0]["message"]["content"], response["usage"]["total_tokens"]
+
+# COMMAND ----------
+
+# add preds with baseline llm
+import time
+import pandas as pd
+from pyspark.sql.functions import pandas_udf
+from typing import Iterator
+
+@pandas_udf("chat string, total_tokens int, error string")
+def chat_udf(iterator: Iterator[pd.Series]) -> Iterator[pd.DataFrame]:
+    client = ChatClient()
+
+    start_time = time.time()
+    total = 0
+    for s in iterator:
+        chats, total_tokens, errors = [], [], []
+        for text in s:
+            total += 1
+            try:
+                chat, num_token = client.predict(text)
+                chats.append(chat)
+                total_tokens.append(num_token)
+                errors.append(None)
+            except Exception as e:
+                chats.append(None)
+                total_tokens.append(0)
+                errors.append(str(e))
+
+            if total % config_logging_interval == 0:
+                print(f"Processed {total} requests in {time.time() - start_time} seconds")
+
+        yield pd.DataFrame({"chat": chats, "total_tokens": total_tokens, "error": errors})
+
+
+# COMMAND ----------
+
+import uuid
+from pyspark.sql.functions import col, cast
+
+input_column = f"input_{uuid.uuid4().hex[:4]}"
+output_column = f"output_{uuid.uuid4().hex[:4]}"
+
+# Step 1: read from the source table
+df = spark.table(config_input_table)
+if config_input_num_rows:
+    df = df.limit(config_input_num_rows)
+
+# Step 2. batch inference
+df = df.repartition(config_concurrecy)  # This is important for performance!!!
+df = df.withColumn(output_column, chat_udf(config_input_column))
+df = (
+    df
+    .withColumn("resp_chat", col(output_column).getItem("chat"))
+    .withColumn("resp_total_tokens", col(output_column).getItem("total_tokens"))
+    .withColumn("resp_error", col(output_column).getItem("error"))
+    .drop(output_column)
 )
-val_qa_eval_sdf = (
-    get_spark()
-    .createDataFrame(val_qa_eval_pdf)
-    .alias("v")
-    .join(
-        get_spark().read.table(f"{catalog}.{schema}.qa_dataset").alias("f"),
-        col("f.answer") == col("v.response"),
+# Step 3: write to the output table
+df.write.mode("overwrite").saveAsTable(config_output_table)
+
+# COMMAND ----------
+
+# Check response
+display(spark.table(config_output_table).limit(10))
+
+# COMMAND ----------
+
+eval_df_preds = spark.table(config_output_table)\
+                .withColumnRenamed("resp_chat", "pred_baseline")\
+                .withColumnRenamed("outline","inputs")\
+                .filter(col('resp_error').isNull())\
+                .drop("resp_total_tokens", "resp_error").toPandas()
+display(eval_df_preds)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC Note: you may want to look into defining your own metric here with a rubric that aligns more closely to your use case: https://docs.databricks.com/en/mlflow/llm-evaluate.html
+
+# COMMAND ----------
+
+import mlflow
+
+run_name = 'baseline_llama_3_1_8b'
+llm_judge = "databricks-meta-llama-3-1-70b-instruct"
+
+with mlflow.start_run(run_name=run_name) as run:
+    baseline_results = mlflow.evaluate(
+        data=eval_df_preds,
+        targets="expected_response",
+        predictions="pred_baseline",
+        extra_metrics=[
+                mlflow.metrics.genai.answer_similarity(model=f"endpoints:/{llm_judge}"),
+                mlflow.metrics.genai.answer_correctness(model=f"endpoints:/{llm_judge}")
+            ],
+        evaluators="default",
     )
-    .select(col("f.context"), col("f.question"), col("f.answer"))
-)
-val_qa_eval_df = val_qa_eval_sdf.toPandas()
-display(val_qa_eval_df)  # noqa
+
+baseline_results.metrics
 
 # COMMAND ----------
 
-eval_results = evaluate_qa_chain(
-    val_qa_eval_df,
-    ["context", "question"],
-    qa_chain_zeroshot,
-    "CRR_Llama_Baseline_ZeroShot",
-)
-print(f"See evaluation metrics below: \n{eval_results.metrics}")
-display(eval_results.tables["eval_results_table"])  # noqa
+# update configs below for ft endpoint
+config_endpoint = endpoint_name_ift
+config_output_table = output_table_name_ft
 
 # COMMAND ----------
 
-eval_results = evaluate_qa_chain(
-    val_qa_eval_df,
-    ["context", "question"],
-    qa_chain_with_ctx,
-    "CRR_Llama_Baseline_With_Ctx",
-)
-print(f"See evaluation metrics below: \n{eval_results.metrics}")
-display(eval_results.tables["eval_results_table"])  # noqa
+# add preds with ft llm, have to re-run to initialize the different configs above ^
+import time
+import pandas as pd
+from pyspark.sql.functions import pandas_udf
+from typing import Iterator
+
+@pandas_udf("chat string, total_tokens int, error string")
+def chat_udf(iterator: Iterator[pd.Series]) -> Iterator[pd.DataFrame]:
+    client = ChatClient()
+
+    start_time = time.time()
+    total = 0
+    for s in iterator:
+        chats, total_tokens, errors = [], [], []
+        for text in s:
+            total += 1
+            try:
+                chat, num_token = client.predict(text)
+                chats.append(chat)
+                total_tokens.append(num_token)
+                errors.append(None)
+            except Exception as e:
+                chats.append(None)
+                total_tokens.append(0)
+                errors.append(str(e))
+
+            if total % config_logging_interval == 0:
+                print(f"Processed {total} requests in {time.time() - start_time} seconds")
+
+        yield pd.DataFrame({"chat": chats, "total_tokens": total_tokens, "error": errors})
+
 
 # COMMAND ----------
 
-llm_mistral = ChatDatabricks(endpoint="FILL THIS IN", temperature=0.1) #update endpoint
-qa_chain_zeroshot = build_retrievalqa_zeroshot_chain(QA_TEMPLATE_ZEROSHOT, llm_mistral)
-qa_chain_with_ctx = build_retrievalqa_with_context_chain(
-    QA_TEMPLATE_WITH_CTX, llm_mistral
+import uuid
+from pyspark.sql.functions import col, cast
+
+input_column = f"input_{uuid.uuid4().hex[:4]}"
+output_column = f"output_{uuid.uuid4().hex[:4]}"
+
+# Step 1: read from the source table
+df = spark.table(config_input_table)
+if config_input_num_rows:
+    df = df.limit(config_input_num_rows)
+
+# Step 2. batch inference
+df = df.repartition(config_concurrecy)  # This is important for performance!!!
+df = df.withColumn(output_column, chat_udf(config_input_column))
+df = (
+    df
+    .withColumn("resp_chat", col(output_column).getItem("chat"))
+    .withColumn("resp_total_tokens", col(output_column).getItem("total_tokens"))
+    .withColumn("resp_error", col(output_column).getItem("error"))
+    .drop(output_column)
 )
+# Step 3: write to the output table
+df.write.mode("overwrite").saveAsTable(output_table_name_ft)
+
 
 # COMMAND ----------
 
-eval_results = evaluate_qa_chain(
-    val_qa_eval_df,
-    ["context", "question"],
-    qa_chain_zeroshot,
-    "CRR_Llama_FT_ZeroShot",
-)
-print(f"See evaluation metrics below: \n{eval_results.metrics}")
-display(eval_results.tables["eval_results_table"])  # noqa
+display(spark.table(output_table_name_ft).limit(10))
 
 # COMMAND ----------
 
-eval_results = evaluate_qa_chain(
-    val_qa_eval_df,
-    ["context", "question"],
-    qa_chain_with_ctx,
-    "CRR_Llama_FT_With_Ctx",
-)
-print(f"See evaluation metrics below: \n{eval_results.metrics}")
-display(eval_results.tables["eval_results_table"])  # noqa
+eval_df_preds_ft = spark.table(config_output_table)\
+                .withColumnRenamed("resp_chat", "pred_ft")\
+                .withColumnRenamed("outline","inputs")\
+                .filter(col('resp_error').isNull())\
+                .drop("resp_total_tokens", "resp_error").toPandas()
+display(eval_df_preds_ft)
+
+# COMMAND ----------
+
+import mlflow
+
+run_name = 'ft_llama_3_1_8b'
+llm_judge = "databricks-meta-llama-3-1-70b-instruct"
+
+with mlflow.start_run(run_name=run_name) as run:
+    ft_results = mlflow.evaluate(
+        data=eval_df_preds_ft,
+        targets="expected_response",
+        predictions="pred_ft",
+        extra_metrics=[
+                mlflow.metrics.genai.answer_similarity(model=f"endpoints:/{llm_judge}"),
+                mlflow.metrics.genai.answer_correctness(model=f"endpoints:/{llm_judge}")
+            ],
+        evaluators="default",
+    )
+
+ft_results.metrics
