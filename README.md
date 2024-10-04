@@ -1,3 +1,10 @@
-# End-to-end Fine-Tuning of LLMs on Capital Requirements Regulation data
+# End-to-end Fine-Tuning of LLMs to create customer Tone/Voice chatbot
 
-In this demo, we will generate 30k questions and answers related to the Capital Requirements Regulation (CRR), and then do further continued pre-training on the CRR text and related documentation (mostly downloaded from the EBA website), followed by instruction fine-tuning on the generated instructions (30k question-answer pairs generated in the previous step) using Databricks Mosaic Fine-Tuning API and Mosaic Cloud Platform.
+In this demo, we provide notebooks to aid in the process of building a tone/brand chatbot using the Mosaic AI Model Training stack on Databricks. High level steps are as follows:
+
+1. Prepare data for continued pre-training (CPT)
+2. Perform CPT (unsupervised)
+3. Prepare data for Instruction Fine-Tuning (IFT) by creating synthetic outlines of given articles (you will need to provide these articles)
+4. Run IFT (will need to spin up endpoint)
+5. Evaluate
+6. Plug into Review App notebooks to spin up a review app with your final model endpoint
