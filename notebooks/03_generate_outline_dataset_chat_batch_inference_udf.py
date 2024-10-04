@@ -40,24 +40,48 @@ dbutils.fs.mkdirs(f"/Volumes/{catalog}/{schema}/raw_data/articles")
 
 # COMMAND ----------
 
-# use below to read each file into a row of a spark dataframe
-
 from pyspark.sql import functions as F
+import pandas as pd
+from pyspark.sql.functions import col, pandas_udf
+from typing import Iterator
+import re
 
-# Assuming the volume with .txt files is mounted and its path is specified
+# Assuming the volume contains .txt files 
 txt_files_volume_path = f"/Volumes/{catalog}/{schema}/raw_data/articles/"
 
 # Read all .txt files from the volume into a dataframe
 doc_df = spark.read.text(txt_files_volume_path + "*.txt") \
               .withColumn("path", F.input_file_name())
 
+# remove non alphanumeric characters
+def clean(txt):
+    txt = re.sub(r"\n", "", txt)
+    txt = re.sub(r" ?\.", ".", txt)
+    txt = re.sub(r"[^a-zA-Z0-9\s\.,;:!?()\-]", "", txt)
+    return txt
+
+# remove any non utf8 encoded characters
+def ensure_utf8_encoding(txt):
+    # Encode to UTF-8, ignoring errors, then decode back to a string
+    txt = clean(txt)
+    return txt.encode('utf-8', 'ignore').decode('utf-8')
+
+@pandas_udf("string")
+def ensure_utf8_encoding_udf(batch_iter: Iterator[pd.Series]) -> Iterator[pd.Series]:
+    for series in batch_iter:
+        yield series.apply(ensure_utf8_encoding)
+
+# Assuming doc_df is already defined and has a column named "text"
+doc_df = doc_df.withColumn("utf8_text", ensure_utf8_encoding_udf(col("value")))
+
+# display(doc_df)
+
 #Concatenate all lines in each file into a single string, and associate with file name
 doc_df = doc_df.groupBy("path") \
-    .agg(F.collect_list("value").alias("all_lines")) \
+    .agg(F.collect_list("utf8_text").alias("all_lines")) \
     .withColumn("text", F.concat_ws("\n", F.col("all_lines"))) \
     .drop("all_lines")
 
-doc_df.write.mode("overwrite").saveAsTable(f"{catalog}.{schema}.articles")
 display(doc_df)
 
 # COMMAND ----------
@@ -226,7 +250,7 @@ training_dataset = df.filter(df.resp_error.isNull())\
                       .selectExpr("resp_chat as outline", "text as expected_response")
 
 #Sean/Lovekush: work on incorporating brand guidelines into this prompt
-system_prompt = """You are a marketing professional trusted assistant at blackbaud that helps write rough draft copy into the approved tone and voice. Only focus on the content that is provided by the user, don't add any additional context, just focus on getting it into the approved tone. Do not repeat information, answer directly, do not repeat the question, do not start with something like: the answer to the question, do not add AI in front of your answer, do not say: here is the answer. Given the following outline, write a final copy in our approved tone and voice. Outline:\n"""
+system_prompt = """You are a marketing professional trusted assistant that helps write rough draft copy into the approved tone and voice. Only focus on the content that is provided by the user, don't add any additional context, just focus on getting it into the approved tone. Do not repeat information, answer directly, do not repeat the question, do not start with something like: the answer to the question, do not add AI in front of your answer, do not say: here is the answer. Given the following outline, write a final copy in our approved tone and voice. Outline:\n"""
 
 @pandas_udf("array<struct<role:string, content:string>>")
 def create_conversation(outline: pd.Series, expected_response: pd.Series) -> pd.Series:
@@ -245,31 +269,3 @@ training_data.select(create_conversation("outline", "expected_response").alias('
 eval_data.write.mode('overwrite').saveAsTable(f"{catalog}.{schema}.chat_completion_evaluation_dataset")
 
 display(spark.table(f"{catalog}.{schema}.chat_completion_training_dataset"))
-
-# COMMAND ----------
-
-# from pyspark.sql.functions import concat, lit, col
-
-# # Step 1: Filter data to only those records without a resp_error
-# df = spark.table(config_output_table)
-# filtered_df = df.filter(df.resp_error.isNull())
-
-# # Step 2: Concat a system prompt with the resp_chat and rename that column to "prompt"
-# # Lovekush/Sean - work on incorporating brand guidelines into this prompt
-# system_prompt = '''
-# You are a marketing professional trusted assistant at blackbaud that helps write rough draft copy into the approved tone and voice. Only focus on the content that is provided by the user, don't add any additional context, just focus on getting it into the approved tone. Do not repeat information, answer directly, do not repeat the question, do not start with something like: the answer to the question, do not add AI in front of your answer, do not say: here is the answer. Given the following outline, write a final copy in our approved tone and voice. Outline:
-# '''
-# concatenated_df = filtered_df.withColumn("prompt", concat(lit(system_prompt), filtered_df.resp_chat))
-
-# # Step 3: Rename text to "response"
-# ift_df = concatenated_df.withColumnRenamed("text", "response").select(col('prompt'),col('response'))
-
-# display(ift_df.limit(10))
-
-# COMMAND ----------
-
-# ift_train_df, ift_val_df = (
-#     ift_df.randomSplit([0.99, 0.01])
-# )
-# ift_train_df.write.mode("overwrite").saveAsTable(f"{catalog}.{schema}.qa_dataset_train")
-# ift_val_df.write.mode("overwrite").saveAsTable(f"{catalog}.{schema}.qa_dataset_val")

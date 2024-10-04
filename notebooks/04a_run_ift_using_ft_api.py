@@ -80,3 +80,7 @@ run.name
 # COMMAND ----------
 
 display(fm.list())
+
+# COMMAND ----------
+
+# using the UI serve this model as endpoint and set it in the ift_endpoint_name in next notebook and use in a cloned review app notebook

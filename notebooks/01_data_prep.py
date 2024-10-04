@@ -37,6 +37,10 @@ dbutils.fs.mkdirs(f"{raw_data_path}/training/cpt/text/val")
 # use below to read each file into a row of a spark dataframe
 
 from pyspark.sql import functions as F
+import pandas as pd
+from pyspark.sql.functions import col, pandas_udf
+from typing import Iterator
+import re
 
 # Assuming the volume with .txt files is mounted and its path is specified
 txt_files_volume_path = f"{raw_data_path}/raw_data/"
@@ -45,9 +49,30 @@ txt_files_volume_path = f"{raw_data_path}/raw_data/"
 doc_df = spark.read.text(txt_files_volume_path + "*.txt") \
               .withColumn("path", F.input_file_name())
 
+def clean(txt):
+    txt = re.sub(r"\n", "", txt)
+    txt = re.sub(r" ?\.", ".", txt)
+    txt = re.sub(r"[^a-zA-Z0-9\s\.,;:!?()\-]", "", txt)
+    return txt
+
+def ensure_utf8_encoding(txt):
+    # Encode to UTF-8, ignoring errors, then decode back to a string
+    txt = clean(txt)
+    return txt.encode('utf-8', 'ignore').decode('utf-8')
+
+@pandas_udf("string")
+def ensure_utf8_encoding_udf(batch_iter: Iterator[pd.Series]) -> Iterator[pd.Series]:
+    for series in batch_iter:
+        yield series.apply(ensure_utf8_encoding)
+
+# Assuming doc_df is already defined and has a column named "text"
+doc_df = doc_df.withColumn("utf8_text", ensure_utf8_encoding_udf(col("value")))
+
+# display(doc_df)
+
 #Concatenate all lines in each file into a single string, and associate with file name
 doc_df = doc_df.groupBy("path") \
-    .agg(F.collect_list("value").alias("all_lines")) \
+    .agg(F.collect_list("utf8_text").alias("all_lines")) \
     .withColumn("text", F.concat_ws("\n", F.col("all_lines"))) \
     .drop("all_lines")
 
