@@ -1,5 +1,5 @@
 # Databricks notebook source
-#single node MLR 14.3
+# 14.3 MLR LTS
 %pip install -r ../requirements.txt
 
 # COMMAND ----------

@@ -11,6 +11,10 @@ from pyspark.sql.functions import col, explode
 from pyspark.sql.pandas.functions import pandas_udf
 from transformers import AutoTokenizer
 from unstructured.partition.pdf import partition_pdf
+import warnings
+from pypdf import PdfReader
+
+
 
 from finreganalytics.utils import get_spark
 
@@ -33,17 +37,28 @@ def load_and_clean_data(source_folder: str) -> DataFrame:
     def clean(txt):
         txt = re.sub(r"\n", "", txt)
         return re.sub(r" ?\.", ".", txt)
-
-    def parse_and_clean_one_pdf(b: bytes) -> str:
-        chunks = partition_pdf(file=io.BytesIO(b))
-        return "\n".join([clean(s.text) for s in chunks])
+    
+    def parse_bytes_pypdf(raw_doc_contents_bytes: bytes):
+        try:
+            pdf = io.BytesIO(raw_doc_contents_bytes)
+            reader = PdfReader(pdf)
+            parsed_content = [page_content.extract_text() for page_content in reader.pages]
+            cleaned_content = [clean(t) for t in parsed_content]
+            return "\n".join(parsed_content)
+        except Exception as e:
+            warnings.warn(f"Exception {e} has been thrown during parsing")
+            return None
+        
+    # def parse_and_clean_one_pdf(b: bytes) -> str:
+    #     chunks = partition_pdf(file=io.BytesIO(b))
+    #     return "\n".join([clean(s.text) for s in chunks])
 
     @pandas_udf("string")
     def parse_and_clean_pdfs_udf(
         batch_iter: Iterator[pd.Series],
     ) -> Iterator[pd.Series]:
         for series in batch_iter:
-            yield series.apply(parse_and_clean_one_pdf)
+            yield series.apply(parse_bytes_pypdf)
 
     return df.select(col("path"), parse_and_clean_pdfs_udf("content").alias("text"))
 

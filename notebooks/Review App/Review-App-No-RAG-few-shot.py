@@ -1,6 +1,7 @@
 # Databricks notebook source
-# MAGIC %pip install -r requirements.txt
-# MAGIC dbutils.library.restartPython()
+# MLR 14.3 LTS
+%pip install -r requirements.txt
+dbutils.library.restartPython()
 
 # COMMAND ----------
 
@@ -9,7 +10,6 @@
 
 # COMMAND ----------
 
-#Lovekush - update this
 catalog = 'users'
 db = 'max_carduner'
 
@@ -20,7 +20,7 @@ from databricks.sdk import WorkspaceClient
 
 context = get_context()
 
-secret_scope_name = "max_demo" #LK update this
+secret_scope_name = "review_app_demo"
 
 databricks_host = context.browserHostName
 databricks_api_token = context.apiToken
@@ -38,8 +38,6 @@ w.secrets.put_secret(scope=secret_scope_name, key='host_url', string_value=datab
 
 os.environ['DATABRICKS_HOST'] = dbutils.secrets.get(scope=secret_scope_name, key='host_url')
 os.environ['DATABRICKS_API_TOKEN'] = dbutils.secrets.get(scope=secret_scope_name, key='api_token')
-
-
 
 # COMMAND ----------
 
@@ -77,12 +75,10 @@ rag_chain_config = {
     },
     "input_example": {
         "messages": [
-            {"role": "user", "content": "What is Apache Spark"},
-            {"role": "assistant", "content": "Apache spark is a distributed, OSS in-memory computation engine."},
-            {"role": "user", "content": "Does it support streaming?"}
+            {"role": "user", "content": "Databricks is cool"},
+            {"role": "assistant", "content": "Databricks is a cutting-edge platform that has transformed the big data landscape, providing a unified and user-friendly environment for data engineering, data science, and analytics, and enabling organizations to extract actionable insights and drive strategic decision-making."}
         ]
     },
-    #Lovekush - see below and add your examples here, feel free to tweak this prompt
     "llm_config": {
         "llm_parameters": {"max_tokens": 5000, "temperature": 0.01},
         "llm_prompt_template": '''You are a marketing professional trusted assistant at blackbaud that helps write rough draft copy into the approved tone and voice. Only focus on the content that is provided by the user, don't add any additional context, just focus on getting it into the approved tone. Do not repeat information, answer directly, do not repeat the question, do not start with something like: the answer to the question, do not add AI in front of your answer, do not say: here is the answer. See examples below: 
@@ -240,7 +236,7 @@ chain.invoke(model_config.get("input_example"))
 
 # COMMAND ----------
 
-MODEL_NAME = "review_app_no_rag_1"
+MODEL_NAME = "review_app_no_rag"
 MODEL_NAME_FQN = f"{catalog}.{db}.{MODEL_NAME}"
 # Register the chain to UC
 uc_registered_model_info = mlflow.register_model(model_uri=logged_chain_info.model_uri, name=MODEL_NAME_FQN)
@@ -251,10 +247,10 @@ uc_registered_model_info
 from databricks import agents
 
 # Deploy to enable the Review APP and create an API endpoint
-deployment_info = agents.deploy(model_name=MODEL_NAME_FQN, model_version=uc_registered_model_info.version, scale_to_zero=True, environment_vars= #update this LK below 
+deployment_info = agents.deploy(model_name=MODEL_NAME_FQN, model_version=uc_registered_model_info.version, scale_to_zero=True, environment_vars=
                                 {
-                                   "DATABRICKS_HOST": "{{secrets/max_demo/host_url}}",
-                                   "DATABRICKS_TOKEN": "{{secrets/max_demo/api_token}}"
+                                   "DATABRICKS_HOST": "{{secrets/review_app_demo/host_url}}",
+                                   "DATABRICKS_TOKEN": "{{secrets/review_app_demo/api_token}}"
                                   })
 
 instructions_to_reviewer = f"""### Instructions for Testing the our Databricks Documentation Chatbot assistant
@@ -284,6 +280,12 @@ wait_for_model_serving_endpoint_to_be_ready(deployment_info.endpoint_name)
 
 # COMMAND ----------
 
+
+
+# COMMAND ----------
+
+from databricks import agents
+MODEL_NAME_FQN = f"{catalog}.{db}.review_app_no_rag"
 user_list = []
 # Set the permissions.
 agents.set_permissions(model_name=MODEL_NAME_FQN, users=user_list, permission_level=agents.PermissionLevel.CAN_QUERY)
@@ -293,21 +295,3 @@ print(f"Share this URL with your stakeholders: {deployment_info.review_app_url}"
 # COMMAND ----------
 
 deployment_info.review_app_url
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC
-# MAGIC ## Conclusion
-# MAGIC
-# MAGIC We've seen how we can improve our chatbot, adding more advanced capabilities to handle a chat history.
-# MAGIC
-# MAGIC As you add capabilities to your model and tune the prompt, it will get harder to evaluate your model performance in a repeatable way.
-# MAGIC
-# MAGIC Your new prompt might work well for what you tried to fixed, but could also have impact on other questions.
-# MAGIC
-# MAGIC ## Next: Introducing offline model evaluation with Mosaic AI Agent Evaluation
-# MAGIC
-# MAGIC To solve these issue, we need a repeatable way of testing our model answer as part of our LLMOps deployment!
-# MAGIC
-# MAGIC Open the next [03-Offline-Evaluation]($./03-Offline-Evaluation) notebook to discover how to evaluate your model.
