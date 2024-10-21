@@ -1,15 +1,20 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC - change params to your catalog/schema
-# MAGIC - add .txt files to the volume raw_data
+# MAGIC - using databricks docs here as an example but swap with your pdfs or .txt files
+# MAGIC   - note: there is a code block commented out that works with .txt files
 # MAGIC - Compute:
-# MAGIC   - Runtime: DBR 14.3 LTS 
+# MAGIC   - Runtime: DBR 14.3 LTS
 # MAGIC   - For this first notebook will likely want to make it multinode as well, disable autoscaling and just set it to 4 or 6 nodes to process the data faster
 
 # COMMAND ----------
 
 # MAGIC %pip install -r ../requirements.txt
 # MAGIC dbutils.library.restartPython()
+
+# COMMAND ----------
+
+# MAGIC %run ../_resources/00-init-advanced
 
 # COMMAND ----------
 
@@ -26,68 +31,74 @@ spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.{schema}.training")
 
 dbutils.fs.mkdirs(f"{raw_data_path}/training/cpt/text/train")
 dbutils.fs.mkdirs(f"{raw_data_path}/training/cpt/text/val")
+dbutils.fs.mkdirs(f"{raw_data_path}/raw_data/raw_data_pdfs")
 
 # COMMAND ----------
 
-# MAGIC %md
-# MAGIC upload .txt files to raw_data for this to work
+# List our raw PDF docs
+volume_folder =  f"{raw_data_path}/raw_data/raw_data_pdfs"
+# Let's upload some pdf files to our volume as example. Change this with your own PDFs / docs.
+upload_pdfs_to_volume(volume_folder)
+
+display(dbutils.fs.ls(volume_folder))
 
 # COMMAND ----------
 
-# use below to read each file into a row of a spark dataframe
+# # uncomment to use with .txt files
+# # use below to read each file into a row of a spark dataframe
 
-from pyspark.sql import functions as F
-import pandas as pd
-from pyspark.sql.functions import col, pandas_udf
-from typing import Iterator
-import re
+# from pyspark.sql import functions as F
+# import pandas as pd
+# from pyspark.sql.functions import col, pandas_udf
+# from typing import Iterator
+# import re
 
-# Assuming the volume with .txt files is mounted and its path is specified
-txt_files_volume_path = f"{raw_data_path}/raw_data/"
+# # Assuming the volume with .txt files is mounted and its path is specified
+# txt_files_volume_path = f"{raw_data_path}/raw_data/"
 
-# Read all .txt files from the volume into a dataframe
-doc_df = spark.read.text(txt_files_volume_path + "*.txt") \
-              .withColumn("path", F.input_file_name())
+# # Read all .txt files from the volume into a dataframe
+# doc_df = spark.read.text(txt_files_volume_path + "*.txt") \
+#               .withColumn("path", F.input_file_name())
 
-def clean(txt):
-    txt = re.sub(r"\n", "", txt)
-    txt = re.sub(r" ?\.", ".", txt)
-    txt = re.sub(r"[^a-zA-Z0-9\s\.,;:!?()\-]", "", txt)
-    return txt
+# def clean(txt):
+#     txt = re.sub(r"\n", "", txt)
+#     txt = re.sub(r" ?\.", ".", txt)
+#     txt = re.sub(r"[^a-zA-Z0-9\s\.,;:!?()\-]", "", txt)
+#     return txt
 
-def ensure_utf8_encoding(txt):
-    # Encode to UTF-8, ignoring errors, then decode back to a string
-    txt = clean(txt)
-    return txt.encode('utf-8', 'ignore').decode('utf-8')
+# def ensure_utf8_encoding(txt):
+#     # Encode to UTF-8, ignoring errors, then decode back to a string
+#     txt = clean(txt)
+#     return txt.encode('utf-8', 'ignore').decode('utf-8')
 
-@pandas_udf("string")
-def ensure_utf8_encoding_udf(batch_iter: Iterator[pd.Series]) -> Iterator[pd.Series]:
-    for series in batch_iter:
-        yield series.apply(ensure_utf8_encoding)
+# @pandas_udf("string")
+# def ensure_utf8_encoding_udf(batch_iter: Iterator[pd.Series]) -> Iterator[pd.Series]:
+#     for series in batch_iter:
+#         yield series.apply(ensure_utf8_encoding)
 
-# Assuming doc_df is already defined and has a column named "text"
-doc_df = doc_df.withColumn("utf8_text", ensure_utf8_encoding_udf(col("value")))
+# # Assuming doc_df is already defined and has a column named "text"
+# doc_df = doc_df.withColumn("utf8_text", ensure_utf8_encoding_udf(col("value")))
+
+# # display(doc_df)
+
+# #Concatenate all lines in each file into a single string, and associate with file name
+# doc_df = doc_df.groupBy("path") \
+#     .agg(F.collect_list("utf8_text").alias("all_lines")) \
+#     .withColumn("text", F.concat_ws("\n", F.col("all_lines"))) \
+#     .drop("all_lines")
 
 # display(doc_df)
 
-#Concatenate all lines in each file into a single string, and associate with file name
-doc_df = doc_df.groupBy("path") \
-    .agg(F.collect_list("utf8_text").alias("all_lines")) \
-    .withColumn("text", F.concat_ws("\n", F.col("all_lines"))) \
-    .drop("all_lines")
+# COMMAND ----------
 
+# use below if you want to load in pdfs, otherwise comment out
+doc_df = load_and_clean_data(volume_folder)
 display(doc_df)
 
 # COMMAND ----------
 
-# uncomment below if you want to load in pdfs
-# doc_df = load_and_clean_data(f"{raw_data_path}/raw_data")
-# display(doc_df)
-
-# COMMAND ----------
-
 splitted_df = split(
-    doc_df, hf_tokenizer_name="hf-internal-testing/llama-tokenizer", chunk_size=500
+    doc_df.filter(doc_df.text.isNotNull()), hf_tokenizer_name="hf-internal-testing/llama-tokenizer", chunk_size=500
 )
 display(splitted_df)
 

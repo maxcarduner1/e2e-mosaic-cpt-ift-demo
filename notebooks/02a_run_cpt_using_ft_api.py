@@ -1,5 +1,6 @@
 # Databricks notebook source
-# MAGIC %pip install -r ../requirements.txt
+# 14.3 MLR LTS
+%pip install -r ../requirements.txt
 
 # COMMAND ----------
 

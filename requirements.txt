@@ -4,8 +4,8 @@ langchain
 langchain-community
 langchain_text_splitters
 transformers
-mosaicml_cli
+gql
+poppler-utils
 unstructured[pdf,docx]
 requests-toolbelt
-mosaicml-streaming
 mlflow[genai,databricks]
