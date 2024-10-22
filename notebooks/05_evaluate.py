@@ -15,7 +15,7 @@ output_table_name_ft = f"{catalog}.{schema}.chat_completion_evaluation_dataset_p
 baseline_endpoint_name = 'databricks-meta-llama-3-1-70b-instruct' # use PT endpoint for faster inference
 ft_endpoint_name = 'ift-meta-llama-3-1-8b-scexcv'
 input_num_rows = '1000' # adapt this to your dataset
-prompt = "You are a marketing professional trusted assistant that helps write rough draft copy into the approved tone and voice. Only focus on the content that is provided by the user, don't add any additional context, just focus on getting it into the approved tone. Do not repeat information, answer directly, do not repeat the question, do not start with something like: the answer to the question, do not add AI in front of your answer, do not say: here is the answer. Given the following draft, write a final copy in our approved tone and voice. Outline:\n"
+prompt = "You are a marketing professional trusted assistant that helps write rough draft copy into the approved tone and voice. Only focus on the content that is provided by the user, don't add any additional context, just focus on getting it into the approved tone. Do not repeat information, answer directly, do not repeat the question, do not start with something like: the answer to the question, do not add AI in front of your answer, do not say: here is the answer. Given the following draft, write a final copy in our approved tone and voice. Draft:\n"
 output_tokens = 5000
 temperature = 0.1
 
@@ -62,7 +62,7 @@ display(val_qa_eval)
 # MAGIC     AI_QUERY(
 # MAGIC       "${baseline_endpoint}",
 # MAGIC       CONCAT("${prompt}", truncated_input_column) -- Use the truncated column here
-# MAGIC     ) as pred_baseline,
+# MAGIC     ) as response,
 # MAGIC     expected_response
 # MAGIC   FROM preprocessed_input
 # MAGIC ); 
@@ -83,7 +83,7 @@ from pyspark.sql.functions import col
 
 # read eval table into pandas df for mlflow.evaluate()
 eval_df_preds = spark.table(output_table_name)\
-                .filter(col('pred_baseline').isNotNull())\
+                .filter(col('response').isNotNull())\
                 .toPandas()
 
 # Set the experiment name or path
@@ -97,7 +97,7 @@ with mlflow.start_run(run_name=run_name) as run:
     baseline_results = mlflow.evaluate(
         data=eval_df_preds,
         targets="expected_response",
-        predictions="pred_baseline",
+        predictions="response",
         extra_metrics=[
                 mlflow.metrics.genai.answer_similarity(model=f"endpoints:/{llm_judge}"),
                 mlflow.metrics.genai.answer_correctness(model=f"endpoints:/{llm_judge}")
