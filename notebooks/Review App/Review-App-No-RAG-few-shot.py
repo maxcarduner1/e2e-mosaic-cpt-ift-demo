@@ -76,7 +76,8 @@ rag_chain_config = {
     "input_example": {
         "messages": [
             {"role": "user", "content": "Databricks is cool"},
-            {"role": "assistant", "content": "Databricks is a cutting-edge platform that has transformed the big data landscape, providing a unified and user-friendly environment for data engineering, data science, and analytics, and enabling organizations to extract actionable insights and drive strategic decision-making."}
+            {"role": "assistant", "content": "Databricks is a cutting-edge platform that has transformed the big data landscape, providing a unified and user-friendly environment for data engineering, data science, and analytics, and enabling organizations to extract actionable insights and drive strategic decision-making."},
+            {"role": "user", "content": "Incorporate more information on Gen AI capabilities"},
         ]
     },
     "llm_config": {

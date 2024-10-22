@@ -43,7 +43,7 @@ get_dbutils().widgets.text("training_duration", "10ep", "training_duration") # C
 get_dbutils().widgets.text("learning_rate", "1e-6", "learning_rate")
 get_dbutils().widgets.text(
     "custom_weights_path",
-    "dbfs:/databricks/mlflow-tracking/3333570012308106/10881276cc5e4007a5f01259c28077e4/artifacts/contd-pretrain-meta-llama-3-1-8b-tg1i9b/checkpoints/ep1-ba3", #replace with yours
+    "dbfs:/databricks/mlflow-tracking/2480805060978746/32e111f913ff4f1a9de48aad9bd0b220/artifacts/contd-pretrain-meta-llama-3-1-8b-xyv86z/checkpoints/ep1-ba2", #replace with yours
     "custom_weights_path",
 )
 
@@ -83,4 +83,4 @@ display(fm.list())
 
 # COMMAND ----------
 
-# using the UI serve this model as endpoint and set it in the ift_endpoint_name in next notebook and use in a cloned review app notebook
+# using the UI serve this model as endpoint and set it in the ift_endpoint_name in next notebook and use in a cloned review app notebook if the results are promising, otherwise focus on few-shot prompting
